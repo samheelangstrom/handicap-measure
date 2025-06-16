@@ -3,6 +3,9 @@ import requests
 
 st.set_page_config(page_title="Golf Handicap Calculator", page_icon="🏌️")
 
+# --- Defaults to avoid NameError ---
+rating, slope, par = 66.0, 113, 72
+
 # --- API Key & Base ---
 API_KEY = "FKU4CCHVZDLQ5PDTN7YLVCCIDE"
 BASE_URL = "https://api.golfcourseapi.com/v1"
