@@ -1,80 +1,70 @@
 import streamlit as st
 import requests
 
-st.set_page_config(page_title="Golf Handicap Calculator", page_icon="🏉")
+st.set_page_config(page_title="Golf Handicap Calculator", page_icon="🏌️")
 
-st.title("🏉 UK Golf Handicap Calculator")
-
+# --- API Key & Base ---
 API_KEY = "FKU4CCHVZDLQ5PDTN7YLVCCIDE"
-API_URL = "https://api.golfcourseapi.com/api/v1/courses/search"
-DETAILS_URL = "https://api.golfcourseapi.com/api/v1/courses"
+BASE_URL = "https://api.golfcourseapi.com/v1"
 
-# User selects number of holes played
-num_holes = st.selectbox("How many holes did you play?", options=[6, 9, 12, 18], index=2)
+# --- Header ---
+st.title("🏌️ UK Golf Handicap Calculator")
 
-# Search and select golf course
-search_term = st.text_input("Search for a golf course in the UK:")
-selected_course = None
-course_data = None
+# --- Search Input ---
+query = st.text_input("Search for a UK golf course:")
 
-if search_term:
+course_data = {}
+if query:
+    search_url = f"{BASE_URL}/courses"
+    params = {"q": query, "country": "GB", "limit": 5}
     headers = {"x-api-key": API_KEY}
-    params = {"query": search_term, "country": "GB"}
-    response = requests.get(API_URL, headers=headers, params=params)
+    response = requests.get(search_url, params=params, headers=headers)
 
     if response.status_code == 200:
-        results = response.json().get("courses", [])
-        if results:
-            course_names = [f"{c['name']} ({c['city']})" for c in results]
-            choice = st.selectbox("Select a course:", course_names)
-            selected_course = next(c for c in results if f"{c['name']} ({c['city']})" == choice)
+        courses = response.json().get("courses", [])
+        course_names = [f"{c['name']} ({c.get('city', '')})" for c in courses]
+        selected = st.selectbox("Select a course:", options=["-- Select --"] + course_names)
 
-            # Fetch full details
-            detail_resp = requests.get(f"{DETAILS_URL}/{selected_course['id']}", headers=headers)
+        if selected != "-- Select --":
+            course_data = next(c for c in courses if f"{c['name']} ({c.get('city', '')})" == selected)
+            course_id = course_data["id"]
+
+            # Get detailed course info
+            detail_url = f"{BASE_URL}/courses/{course_id}"
+            detail_resp = requests.get(detail_url, headers=headers)
+
             if detail_resp.status_code == 200:
-                course_data = detail_resp.json()
-        else:
-            st.warning("No matching courses found.")
+                tee_data = detail_resp.json().get("tees", [])
+                if tee_data:
+                    tee = tee_data[0]  # Use first tee box for now
+                    rating = tee.get("rating", 0.0)
+                    slope = tee.get("slope", 0)
+                    par = tee.get("par", 0)
+                else:
+                    rating, slope, par = 0.0, 0, 0
+            else:
+                st.error("Could not fetch detailed course info.")
+                rating, slope, par = 0.0, 0, 0
     else:
-        st.error("Failed to fetch courses from API.")
+        st.error("Course search failed.")
+        rating, slope, par = 0.0, 0, 0
+else:
+    rating, slope, par = 0.0, 0, 0
 
-rating = 0.0
-slope = 109
-par = 44
+# --- Hole Count & Gross Input ---
+num_holes = st.selectbox("How many holes did you play?", [6, 9, 12, 18])
+gross = st.number_input(f"Your gross score over {num_holes} holes:", min_value=1, value=63)
 
-if course_data:
-    st.markdown("### Course Details")
-    info = {
-        "Course Name": course_data.get("name"),
-        "City": course_data.get("city"),
-        "State/Region": course_data.get("state"),
-        "Country": course_data.get("country"),
-    }
-    st.write(info)
+# --- Error-proof rating/slope/par ---
+rating = rating if rating >= 1.0 else 66.0
+slope = slope if slope >= 55 else 113
+par = par if par >= 1 else 72
 
-    # Extract rating/slope from first available tee if present
-    if course_data.get("tees"):
-        tee = course_data["tees"][0]  # use first tee box as default
-        rating = tee.get("rating", rating)
-        slope = tee.get("slope", slope)
-        par = tee.get("par", par)
-        st.info(f"Using tee: {tee.get('name', 'N/A')}")
-
-# User inputs
-gross = st.number_input(f"Your gross score ({num_holes} holes):", min_value=1, value=63)
-par = st.number_input(f"Total par for the {num_holes} holes:", min_value=1, value=par)
-slope = st.number_input("Slope Rating:", min_value=55, max_value=155, value=slope)
 rating = st.number_input(f"Course Rating for {num_holes} holes:", min_value=1.0, value=rating, format="%.1f")
+slope = st.number_input("Slope Rating:", min_value=55, max_value=155, value=slope)
+par = st.number_input(f"Par for {num_holes} holes:", min_value=1, max_value=100, value=par)
 
-# Calculate handicap
-diff = None
+# --- Calculate Handicap Differential ---
 if st.button("Calculate Handicap Differential"):
-    try:
-        differential = ((gross - rating) * 113) / slope
-        st.success(f"🌟 Handicap Differential: {differential:.2f}")
-
-        # Optional estimated 18-hole projection
-        estimated_18_score = (gross / par) * 72
-        st.info(f"📈 Estimated 18-hole gross score: {estimated_18_score:.1f}")
-    except ZeroDivisionError:
-        st.error("Slope Rating cannot be zero.")
+    diff = ((gross - rating) * 113) / slope
+    st.success(f"🎯 Handicap Differential: **{diff:.2f}**")
