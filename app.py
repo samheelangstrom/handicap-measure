@@ -1,79 +1,79 @@
 import streamlit as st
 import requests
+import json
 
 st.set_page_config(page_title="Golf Handicap Calculator", page_icon="🏌️")
 
-# --- Default values to prevent NameError ---
-rating, slope, par = 66.0, 113, 72
+# --- Default fallback values ---
+DEFAULT_RATING = 66.0
+DEFAULT_SLOPE = 113
+DEFAULT_PAR = 72
 
-# --- API Setup ---
+# --- Initialize values ---
+rating, slope, par = DEFAULT_RATING, DEFAULT_SLOPE, DEFAULT_PAR
+
+# --- API or static file setup ---
 API_KEY = "FKU4CCHVZDLQ5PDTN7YLVCCIDE"
 BASE_URL = "https://api.golfcourseapi.com/v1"
 HEADERS = {"x-api-key": API_KEY}
 
-# --- Page Header ---
-st.title("🏌️ UK Golf Handicap Calculator")
+# --- Page Title ---
+st.title("🏌️ Golf Handicap Calculator (By Club and City)")
 
-# --- Cached Course Search ---
+# --- Option A: Load from API ---
 @st.cache_data(show_spinner=False)
-def search_courses(query):
-    if not query or len(query) < 3:
-        return []
-    params = {"q": query, "country": "GB", "limit": 25}
-    response = requests.get(f"{BASE_URL}/courses", params=params, headers=HEADERS)
+def get_all_courses_from_api():
+    url = f"{BASE_URL}/courses?country=GB&limit=1000"
+    response = requests.get(url, headers=HEADERS)
     if response.status_code == 200:
-        courses = response.json().get("courses", [])
-        return sorted(courses, key=lambda c: c["name"])
+        return response.json().get("courses", [])
     return []
 
-# --- Course Search Interface ---
-st.markdown("### Search for a UK Golf Course")
-query = st.text_input("Start typing (min. 3 characters):")
-course_data = {}
+# --- Option B: Load from local JSON (fallback or dev mode) ---
+# @st.cache_data
+# def get_all_courses_from_file():
+#     with open("courses.json", "r") as f:
+#         return json.load(f)["courses"]
 
-if len(query) >= 3:
-    with st.spinner("Searching courses..."):
-        courses = search_courses(query)
-    course_names = [f"{c['name']} ({c.get('city', '')})" for c in courses]
+# --- Load course data ---
+courses = get_all_courses_from_api()  # or use get_all_courses_from_file()
 
-    if course_names:
-        selected = st.selectbox("Select from results:", course_names)
-        course_data = next(c for c in courses if f"{c['name']} ({c.get('city', '')})" == selected)
-        course_id = course_data["id"]
+# --- Dropdown options (club_name + city) ---
+course_options = [
+    f"{course['club_name']} ({course.get('location', {}).get('city', 'Unknown')})"
+    for course in courses
+]
 
-        # --- Fetch Detailed Course Info ---
-        detail_url = f"{BASE_URL}/courses/{course_id}"
-        detail_resp = requests.get(detail_url, headers=HEADERS)
-        if detail_resp.status_code == 200:
-            tee_data = detail_resp.json().get("tees", [])
-            if tee_data:
-                tee = tee_data[0]  # Use first tee box
-                rating = tee.get("rating", rating)
-                slope = tee.get("slope", slope)
-                par = tee.get("par", par)
-            else:
-                st.warning("No tee data found for this course.")
-        else:
-            st.error("Failed to fetch course details.")
+# --- Course Selector ---
+selected_course = st.selectbox("Select a Golf Course:", course_options)
+
+# --- Find selected course data ---
+course_data = next(
+    (c for c in courses if f"{c['club_name']} ({c.get('location', {}).get('city', 'Unknown')})" == selected_course),
+    None
+)
+
+# --- Extract tee data ---
+if course_data:
+    male_tees = course_data.get("tees", {}).get("male", [])
+    if male_tees:
+        tee = male_tees[0]  # Use first male tee box by default
+        rating = tee.get("course_rating", DEFAULT_RATING)
+        slope = tee.get("slope_rating", DEFAULT_SLOPE)
+        par = tee.get("par_total", DEFAULT_PAR)
     else:
-        st.info("No matching courses found.")
-else:
-    st.caption("Start typing at least 3 characters to search for courses...")
+        st.warning("No male tee data available for this course. Using default values.")
 
-# --- Hole Count and Score Input ---
+# --- Hole Count and Gross Score ---
 num_holes = st.selectbox("How many holes did you play?", [6, 9, 12, 18])
 gross = st.number_input(f"Your gross score over {num_holes} holes:", min_value=1, value=63)
 
-# --- Manual Override for Rating, Slope, Par ---
-rating = rating if rating >= 1.0 else 66.0
-slope = slope if slope >= 55 else 113
-par = par if par >= 1 else 72
-
+# --- Manual Override of Ratings ---
 rating = st.number_input(f"Course Rating for {num_holes} holes:", min_value=1.0, value=rating, format="%.1f")
 slope = st.number_input("Slope Rating:", min_value=55, max_value=155, value=slope)
 par = st.number_input(f"Par for {num_holes} holes:", min_value=1, max_value=100, value=par)
 
-# --- Handicap Differential Calculation ---
+# --- Calculate Handicap Differential ---
 if st.button("Calculate Handicap Differential"):
     diff = ((gross - rating) * 113) / slope
     st.success(f"🎯 Handicap Differential: **{diff:.2f}**")
